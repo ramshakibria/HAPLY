@@ -171,121 +171,63 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
         # targ_pose = [ct_pose[0]-cart_pose[0],
         #           ct_pose[1]-cart_pose[1],
         #           ct_pose[2]+cart_pose[2],
-
         #           ct_pose[3]+cart_pose[3],
-
         #           ct_pose[4]+cart_pose[4],
-
         #           ct_pose[5]-cart_pose[5]
-
         #           ]
 
         if btn[0] == True:
-
             code = arm.open_lite6_gripper()
-
             #code = arm.open_lite6_gripper()
-
         if btn[1] == True:
-
             code = arm.close_lite6_gripper()
-
         if exit_event.is_set():
 
-
-
             arm.set_mode(0)
-
             arm.set_state(state=0)
 
-
-
             arm.set_position(*INITPOSE, speed=SPEED, mvacc=ACC, wait=True)
-
             print("Manual stop detected, ending controlling loop...")
-
             break
-
-
 
         if first_action:
 
-
-
             first_action = False
-
-
 
             temp_pose = [tar_pose[0], tar_pose[1], tar_pose[2], 180, 5, 0]
 
-
-
             arm.set_mode(0)
-
             arm.set_state(state=0)
-
-
 
             arm.set_position(*temp_pose, speed=SPEED, mvacc=ACC, wait=True)
 
-
-
             time.sleep(0.5)
 
-                
-
             arm.set_mode(1)
-
             arm.set_state(0)
-
             time.sleep(0.1)
 
-
-
         #await arm.set_servo_cartesian(mvpose=targ_pose, speed=SPEED, mvacc=ACC)
-
         code = arm.set_servo_cartesian(mvpose=tar_pose, speed=SERVO_SPEED, mvacc=SERVO_ACC)
-
         time.sleep(0.01)
-
         if code != 0:
-
             exit_event.set()
-
     print("Controlling loop ended.")
 
-
-
 def get_tar_pose(incoming_msg:list):
-
     x = m_x(incoming_msg[0])
-
     y = m_y(incoming_msg[1])
-
     z = m_z(incoming_msg[2])
 
-
-
     rx = incoming_msg[5]*180
-
     ry = incoming_msg[3]*180
-
     rz = incoming_msg[4]*180
 
-
-
     tar_pose = [x,y,z,rx+180,5-ry,-rz]
-
     sensor_btn = [incoming_msg[6], incoming_msg[7], incoming_msg[8]]
-
-
 
     return tar_pose, sensor_btn
 
-
-
 # Run the asynchronous main function
-
 if __name__ == "__main__":
-
     asyncio.run(main())
