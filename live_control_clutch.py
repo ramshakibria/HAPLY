@@ -19,8 +19,8 @@ SERVO_ACC = 2
 
 INITPOSE = [200, 0, 200, 180, 0, 0]
 
-# Button index for clutch toggle (buttons a,b,c -> 0,1,2).
-CLUTCH_BUTTON_INDEX = 0
+# Button index for clutch toggle
+CLUTCH_BUTTON_INDEX = 2
 
 sensoring_range = dict(
     x = [-0.031, -0.31],
@@ -28,14 +28,11 @@ sensoring_range = dict(
     z = [-0.11, 0.4]
 )
 
-
-
 controlling_range = dict(
     x = [110, 350],
     y = [-150, 150],
     z = [20, 300]
 )
-
 
 
 # Map sensor space (inverse3) into robot space (xArm).
@@ -158,11 +155,7 @@ async def haply_loop(queue: asyncio.Queue=None, exit_event:asyncio.Event=None):
             # Send the force command message to the server
             await ws.send(orjson.dumps(request_msg))
 
-            if buttons['c'] == True:
-                print("Manual stop detected, ending sensoring loop...")
-                exit_event.set()
-                break
-            elif exit_event.is_set():
+            if exit_event.is_set():
                 print("Robot controller stopped unexpectely, ending sensoring loop...")
                 break
         print("Sensoring loop ended.")
