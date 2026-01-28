@@ -175,6 +175,7 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
         #           ct_pose[4]+cart_pose[4],
         #           ct_pose[5]-cart_pose[5]
         #           ]
+        print(f"tar_pose: {tar_pose}")
 
         if btn[0] == True:
             code = arm.open_lite6_gripper()
@@ -209,6 +210,7 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
 
         #await arm.set_servo_cartesian(mvpose=targ_pose, speed=SPEED, mvacc=ACC)
         code = arm.set_servo_cartesian(mvpose=tar_pose, speed=SERVO_SPEED, mvacc=SERVO_ACC)
+        print(f"set_servo_cartesian code: {code}")
         time.sleep(0.01)
         if code != 0:
             exit_event.set()
