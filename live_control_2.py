@@ -8,6 +8,7 @@ from scipy.interpolate import interp1d
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 
+print(f"running: {__file__}", flush=True)
 from xarm.wrapper import XArmAPI
 
 IP = "192.168.1.154"
@@ -164,6 +165,7 @@ async def haply_loop(queue: asyncio.Queue=None, exit_event:asyncio.Event=None):
 async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
 
     first_action = True
+    last_debug = 0.0
 
     while arm.connected and arm.state != 4:
         sensor_pose = await queue.get()
@@ -175,7 +177,10 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
         #           ct_pose[4]+cart_pose[4],
         #           ct_pose[5]-cart_pose[5]
         #           ]
-        print(f"tar_pose: {tar_pose}")
+        now = time.time()
+        debug = now - last_debug > 1.0
+        if debug:
+            print(f"tar_pose: {tar_pose}", flush=True)
 
         if btn[0] == True:
             code = arm.open_lite6_gripper()
@@ -210,7 +215,10 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
 
         #await arm.set_servo_cartesian(mvpose=targ_pose, speed=SPEED, mvacc=ACC)
         code = arm.set_servo_cartesian(mvpose=tar_pose, speed=SERVO_SPEED, mvacc=SERVO_ACC)
-        print(f"set_servo_cartesian code: {code}")
+        if debug or code != 0:
+            print(f"set_servo_cartesian code: {code}", flush=True)
+        if debug:
+            last_debug = now
         time.sleep(0.01)
         if code != 0:
             exit_event.set()
