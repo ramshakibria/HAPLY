@@ -18,10 +18,10 @@ ACC = 20
 SERVO_SPEED = 2
 SERVO_ACC = 2
 
-INITPOSE = [200, 0, 200, 180, 0, 1]
+INITPOSE = [200, 0, 200, 180, 0, 0]
 
 sensoring_range = dict(
-    x = [-0.031, -0.31],
+    x = [-0.031, 0.31],
     y = [0.05, -0.31],
     z = [-0.11, 0.4]
 )
@@ -169,7 +169,9 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
 
     while arm.connected and arm.state != 4:
         sensor_pose = await queue.get()
+        print(f"sensor_pose: {sensor_pose}", flush=True)
         tar_pose, btn = get_tar_pose(sensor_pose)
+
         # targ_pose = [ct_pose[0]-cart_pose[0],
         #           ct_pose[1]-cart_pose[1],
         #           ct_pose[2]+cart_pose[2],
@@ -177,11 +179,12 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
         #           ct_pose[4]+cart_pose[4],
         #           ct_pose[5]-cart_pose[5]
         #           ]
-        now = time.time()
-        debug = now - last_debug > 1.0
-        if debug:
-            print(f"tar_pose: {tar_pose}", flush=True)
+        #now = time.time()
+        #debug = now - last_debug > 1.0
+        #if debug:
 
+        print(f"tar_pose: {tar_pose}", flush=True)
+        print(f"btn: {btn}", flush=True)
         if btn[0] == True:
             code = arm.open_lite6_gripper()
             #code = arm.open_lite6_gripper()
@@ -225,15 +228,17 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
     print("Controlling loop ended.")
 
 def get_tar_pose(incoming_msg:list):
-    x = m_x(incoming_msg[0])
-    y = m_y(incoming_msg[1])
-    z = m_z(incoming_msg[2])
 
+    x = float(m_x(incoming_msg[0]))
+    y = float(m_y(incoming_msg[1]))
+    z = float(m_z(incoming_msg[2]))
+    print(f"mapped x,y,z: {x},{y},{z}", flush=True)
     rx = incoming_msg[5]*180
     ry = incoming_msg[3]*180
     rz = incoming_msg[4]*180
 
     tar_pose = [x,y,z,rx+180,5-ry,-rz]
+    print(f"mapped tar_pose: {tar_pose}", flush=True)
     sensor_btn = [incoming_msg[6], incoming_msg[7], incoming_msg[8]]
 
     return tar_pose, sensor_btn
