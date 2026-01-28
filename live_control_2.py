@@ -18,7 +18,7 @@ ACC = 20
 SERVO_SPEED = 2
 SERVO_ACC = 2
 
-INITPOSE = [200, 0, 200, 180, 0, 0]
+INITPOSE = [200, 0, 200, 180, 0, 1]
 
 sensoring_range = dict(
     x = [-0.031, -0.31],
