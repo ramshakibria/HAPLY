@@ -19,8 +19,8 @@ SERVO_ACC = 2
 
 INITPOSE = [200, 0, 200, 180, 0, 0]
 
-# Button index for clutch toggle
-CLUTCH_BUTTON_INDEX = 2
+# Button index for clutch toggle (buttons: a=0, b=1, c=2)
+CLUTCH_BUTTON_INDEX = 1
 
 sensoring_range = dict(
     x = [-0.031, -0.31],
@@ -55,6 +55,8 @@ async def main():
 
     queue = asyncio.Queue()
     exit_event = asyncio.Event()
+
+    print("Controls: A=gripper toggle, B=clutch toggle, C=stop")
 
     # Run sensor input and robot control concurrently.
     task_haply = asyncio.create_task(haply_loop(queue, exit_event))
@@ -155,16 +157,46 @@ async def haply_loop(queue: asyncio.Queue=None, exit_event:asyncio.Event=None):
             # Send the force command message to the server
             await ws.send(orjson.dumps(request_msg))
 
+            if buttons['c'] == True:
+                print("Manual stop detected, ending sensoring loop...")
+                exit_event.set()
+                break
             if exit_event.is_set():
                 print("Robot controller stopped unexpectely, ending sensoring loop...")
                 break
         print("Sensoring loop ended.")
+
+def update_clutch_state(
+    clutch_pressed: bool,
+    prev_clutch_pressed: bool,
+    clutch_active: bool,
+    base_pose: list,
+    last_tar_pose: list,
+    pose_offset: list,
+    frozen_pose: list,
+):
+    if clutch_pressed and not prev_clutch_pressed:
+        clutch_active = not clutch_active
+        if clutch_active:
+            frozen_pose = list(last_tar_pose) if last_tar_pose is not None else list(base_pose)
+            print("Clutch engaged: holding current pose.")
+        else:
+            if frozen_pose is None:
+                frozen_pose = list(last_tar_pose) if last_tar_pose is not None else list(base_pose)
+            pose_offset = [frozen_pose[i] - base_pose[i] for i in range(6)]
+            print("Clutch released: resuming motion from new Haply pose.")
+    prev_clutch_pressed = clutch_pressed
+
+    return clutch_active, prev_clutch_pressed, pose_offset, frozen_pose
+
 
 async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
 
     first_action = True
     clutch_active = False
     prev_clutch_pressed = False
+    gripper_open = False
+    prev_gripper_pressed = False
     pose_offset = [0, 0, 0, 0, 0, 0]
     frozen_pose = None
     last_tar_pose = None
@@ -175,17 +207,15 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
         base_pose, btn = get_base_pose(sensor_pose)
 
         clutch_pressed = btn[CLUTCH_BUTTON_INDEX]
-        if clutch_pressed and not prev_clutch_pressed:
-            clutch_active = not clutch_active
-            if clutch_active:
-                frozen_pose = list(last_tar_pose) if last_tar_pose is not None else list(base_pose)
-                print("Clutch engaged: holding current pose.")
-            else:
-                if frozen_pose is None:
-                    frozen_pose = list(last_tar_pose) if last_tar_pose is not None else list(base_pose)
-                pose_offset = [frozen_pose[i] - base_pose[i] for i in range(6)]
-                print("Clutch released: resuming motion from new Haply pose.")
-        prev_clutch_pressed = clutch_pressed
+        clutch_active, prev_clutch_pressed, pose_offset, frozen_pose = update_clutch_state(
+            clutch_pressed,
+            prev_clutch_pressed,
+            clutch_active,
+            base_pose,
+            last_tar_pose,
+            pose_offset,
+            frozen_pose,
+        )
 
         if clutch_active:
             tar_pose = frozen_pose
@@ -201,11 +231,14 @@ async def controller_loop(queue:asyncio.Queue, exit_event:asyncio.Event=None):
         #           ct_pose[5]-cart_pose[5]
         #           ]
 
-        if btn[0] == True:
-            code = arm.open_lite6_gripper()
-            #code = arm.open_lite6_gripper()
-        if btn[1] == True:
-            code = arm.close_lite6_gripper()
+        gripper_pressed = btn[0]
+        if gripper_pressed and not prev_gripper_pressed:
+            if gripper_open:
+                code = arm.close_lite6_gripper()
+            else:
+                code = arm.open_lite6_gripper()
+            gripper_open = not gripper_open
+        prev_gripper_pressed = gripper_pressed
         if exit_event.is_set():
 
             # Return to a safe pose before exiting.
