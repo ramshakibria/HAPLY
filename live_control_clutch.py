@@ -1,7 +1,8 @@
 import os
 import sys
 import time
-import asyncio  # Async loops for sensor + robot control
+import asyncio
+from tkinter import N, NO  # Async loops for sensor + robot control
 import websockets  # WebSocket client for device communication
 import orjson  # Fast JSON parsing
 from scipy.interpolate import interp1d
@@ -18,6 +19,10 @@ SERVO_SPEED = 2
 SERVO_ACC = 2
 
 INITPOSE = [200, 0, 200, 180, 0, 0]
+
+# Send force commands continuously to keep the Inverse3 streaming state data.
+FORCE_SEND_HZ = 100.0
+FORCE_SEND_INTERVAL = 1.0 / FORCE_SEND_HZ
 
 # Button index for clutch toggle (buttons: a=0, b=1, c=2)
 CLUTCH_BUTTON_INDEX = 1
@@ -86,81 +91,109 @@ async def haply_loop(queue: asyncio.Queue=None, exit_event:asyncio.Event=None):
     uri = 'ws://localhost:10001'  # WebSocket port for Inverse Service 3.1 json format
     first_message = True
     inverse3_device_id = None
-    force = {"x": 0, "y": 0, "z": 0}  # Forces to send to the Inverse3 device.
+    force = {"x": 0.0, "y": 0.0, "z": 0.0}  # Forces to send to the Inverse3 device.
+    last_force_send = 0.0
 
     # Read sensor data from HaptX/Haply and forward it to the controller.
     async with websockets.connect(uri) as ws:
         while True:
-            # Receive data from the device
-            response = await ws.recv()
-            data = orjson.loads(response)
+            data = None
+            try:
+                # Receive data from the device
+                response = await asyncio.wait_for(ws.recv(), timeout=FORCE_SEND_INTERVAL)
+                data = orjson.loads(response)
+            except asyncio.TimeoutError:
+                # No incoming data yet; still send zero-force to keep streaming active.
+                pass
+            except websockets.exceptions.ConnectionClosed:
+                print("Inverse Service connection closed.")
+                exit_event.set()
+                break
 
-            # Get devices list from the data
-            inverse3_devices = data.get("inverse3", [])
-            verse_grip_devices = data.get("wireless_verse_grip", [])
+            if data is not None:
+                # Get devices list from the data
+                inverse3_devices = data.get("inverse3", [])
+                verse_grip_devices = data.get("wireless_verse_grip", [])
 
-            # Get the first device from the list
-            inverse3_data = inverse3_devices[0] if inverse3_devices else {}
-            verse_grip_data = verse_grip_devices[0] if verse_grip_devices else {}
+                # Get the first device from the list
+                inverse3_data = inverse3_devices[0] if inverse3_devices else {}
+                verse_grip_data = verse_grip_devices[0] if verse_grip_devices else {}
 
-            # Handle the first message to get device IDs and extra information
-            if first_message:
+                # Handle the first message to get device IDs and extra information
+                if first_message:
 
-                first_message = False
+                    first_message = False
 
-                if not inverse3_data:
-                    print("No Inverse3 device found.")
+                    if not inverse3_data:
+                        print("No Inverse3 device found.")
+                        exit_event.set()
+                        break
+                    if not verse_grip_data:
+                        print("No Wireless Verse Grip device found.")
+
+                    # Store device ID for sending forces
+                    inverse3_device_id = inverse3_data.get("device_id")
+
+                    # Get handedness from Inverse3 device config data (only available in the first message)
+                    handedness = inverse3_devices[0].get("config", {}).get("handedness")
+
+                    print(f"Inverse3 device ID: {inverse3_device_id}, Handedness: {handedness}")
+
+                    if verse_grip_data:
+                        print(f"Wireless Verse Grip device ID: {verse_grip_data.get('device_id')}")
+
+                # Extract position, velocity from Inverse3 device state
+                position = inverse3_data.get("state", {}).get("cursor_position", {})
+                velocity = inverse3_data.get("state", {}).get("cursor_velocity", {})
+
+                # Extract buttons and orientation from Wireless Verse Grip device state (or default if not found)
+                buttons = verse_grip_data.get("state", {}).get("buttons", {})
+                orientation = verse_grip_data.get("state", {}).get("orientation", {})
+
+                pos_x = position.get("x")
+                pos_y = position.get("y")
+                pos_z = position.get("z")
+
+                ori_x = orientation.get("x", 0.0)
+                ori_y = orientation.get("y", 0.0)
+                ori_z = orientation.get("z", 0.0)
+
+                btn_a = bool(buttons.get("a", False))
+                btn_b = bool(buttons.get("b", False))
+                btn_c = bool(buttons.get("c", False))
+
+                #print(f"Position: {position} Velocity: {velocity} Orientation: {orientation} Buttons: {buttons}")
+                if pos_x is not None and pos_y is not None and pos_z is not None:
+                    await queue.put([pos_x, pos_y, pos_z,
+                                     ori_x, ori_y, ori_z,
+                                     btn_a,  btn_b, btn_c])
+
+                if btn_c:
+                    print("Manual stop detected, ending sensoring loop...")
                     exit_event.set()
                     break
-                if not verse_grip_data:
-                    print("No Wireless Verse Grip device found.")
-
-                # Store device ID for sending forces
-                inverse3_device_id = inverse3_data.get("device_id")
-
-                # Get handedness from Inverse3 device config data (only available in the first message)
-                handedness = inverse3_devices[0].get("config", {}).get("handedness")
-
-                print(f"Inverse3 device ID: {inverse3_device_id}, Handedness: {handedness}")
-
-                if verse_grip_data:
-                    print(f"Wireless Verse Grip device ID: {verse_grip_data.get('device_id')}")
-
-            # Extract position, velocity from Inverse3 device state
-            position = inverse3_data["state"].get("cursor_position", {})
-            velocity = inverse3_data["state"].get("cursor_velocity", {})
-
-            # Extract buttons and orientation from Wireless Verse Grip device state (or default if not found)
-            buttons = verse_grip_data.get("state", {}).get("buttons", {})
-            orientation = verse_grip_data.get("state", {}).get("orientation", {})
-
-            #print(f"Position: {position} Velocity: {velocity} Orientation: {orientation} Buttons: {buttons}")
-            await queue.put([position['x'], position['y'], position['z'], 
-                             orientation['x'], orientation['y'], orientation['z'], 
-                             buttons['a'],  buttons['b'], buttons['c']])
 
             # Prepare the force command message to send
             # Must send forces to receive state updates (even if forces are 0)
-            request_msg = {
-                "inverse3": [
-                    {
-                        "device_id": inverse3_device_id,
-                        "commands": {
-                            "set_cursor_force": {
-                                "values": force
+            now = time.monotonic()
+            if inverse3_device_id and (now - last_force_send) >= FORCE_SEND_INTERVAL:
+                request_msg = {
+                    "inverse3": [
+                        {
+                            "device_id": inverse3_device_id,
+                            "commands": {
+                                "set_cursor_force": {
+                                    "values": force
+                                }
                             }
                         }
-                    }
-                ]
-            }
+                    ]
+                }
 
-            # Send the force command message to the server
-            await ws.send(orjson.dumps(request_msg))
+                # Send the force command message to the server
+                await ws.send(orjson.dumps(request_msg))
+                last_force_send = now
 
-            if buttons['c'] == True:
-                print("Manual stop detected, ending sensoring loop...")
-                exit_event.set()
-                break
             if exit_event.is_set():
                 print("Robot controller stopped unexpectely, ending sensoring loop...")
                 break
